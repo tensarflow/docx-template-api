@@ -30,7 +30,7 @@ cd docx-template-api
    Use the following command to build the Docker image:
 
    ```bash
-   docker-compose build
+   docker compose build
    ```
 
 2. **Run the Application**
@@ -38,7 +38,7 @@ cd docx-template-api
    Start the application using Docker Compose:
 
    ```bash
-   docker-compose up
+   docker compose up
    ```
 
    This will start the FastAPI application on `http://localhost:8000`.
