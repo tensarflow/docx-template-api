@@ -4,10 +4,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - templates:/app/templates
-      - generated_docs:/app/generated_docs
-      - ./templates.db:/app/templates.db
+      - ./templates:/app/templates
+      - ./generated_docs:/app/generated_docs
+      - ./db:/app/db
+      - ./app:/app/app
 
 volumes:
   templates:
-  generated_docs: 
+  generated_docs:
+  db_data: 

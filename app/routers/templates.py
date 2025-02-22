@@ -35,10 +35,14 @@ async def upload_template(file: UploadFile = File(...), db: Session = Depends(ge
     
     return {"template_id": template_id}
 
-@router.get("/templates/")
+@router.get("/templates")
 def list_templates(db: Session = Depends(get_db)):
-    templates = db.query(Template).all()
-    return {"templates": [{"id": t.id, "filename": t.filename} for t in templates]}
+    try:
+        templates = db.query(Template).all()
+        return {"templates": [{"id": t.id, "filename": t.filename} for t in templates]}
+    except Exception as e:
+        print(f"Error querying templates: {e}")  # Debug print
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/delete-template/{template_id}")
 def delete_template(template_id: str, db: Session = Depends(get_db)):
