@@ -1,10 +1,15 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, InlineImage
 import subprocess
 import uuid
 import os
+from io import BytesIO
+from PIL import Image
+import base64
+import requests
+from docx.shared import Mm
 
 router = APIRouter()
 
@@ -40,6 +45,23 @@ def cleanup_files(output_docx: str, pdf_path: str):
     if pdf_path and os.path.exists(pdf_path):
         os.remove(pdf_path)
 
+# Function to convert base64 or URL to InlineImage
+def get_image(image_data, doc):
+    if image_data.startswith('http'):
+        # Handle URL
+        response = requests.get(image_data)
+        image = Image.open(BytesIO(response.content))
+    else:
+        # Handle base64
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(BytesIO(image_bytes))
+    
+    # Convert to InlineImage
+    image_stream = BytesIO()
+    image.save(image_stream, format=image.format)
+    image_stream.seek(0)
+    return InlineImage(doc, image_stream, width=Mm(50))  # Adjust width as needed
+
 @router.post("/generate-document/")
 async def generate_document(request: GenerateRequest, background_tasks: BackgroundTasks):
     print(f"Generating document for template: {request.template_id}")
@@ -59,8 +81,13 @@ async def generate_document(request: GenerateRequest, background_tasks: Backgrou
         doc_id = str(uuid.uuid4())
         output_docx = f"generated_docs/{doc_id}.docx"
         
-        # Process DOCX with Jinja2
         doc = DocxTemplate(template_path)
+        
+        # Process images in the data
+        for key, value in request.data.items():
+            if isinstance(value, str) and (value.startswith('http') or value.startswith('data:image')):
+                request.data[key] = get_image(value, doc)
+        
         doc.render(request.data)
         doc.save(output_docx)
         
