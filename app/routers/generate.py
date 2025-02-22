@@ -10,6 +10,7 @@ from PIL import Image
 import base64
 import requests
 from docx.shared import Mm
+import traceback
 
 router = APIRouter()
 
@@ -47,20 +48,53 @@ def cleanup_files(output_docx: str, pdf_path: str):
 
 # Function to convert base64 or URL to InlineImage
 def get_image(image_data, doc):
-    if image_data.startswith('http'):
-        # Handle URL
-        response = requests.get(image_data)
-        image = Image.open(BytesIO(response.content))
-    else:
-        # Handle base64
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(BytesIO(image_bytes))
-    
-    # Convert to InlineImage
-    image_stream = BytesIO()
-    image.save(image_stream, format=image.format)
-    image_stream.seek(0)
-    return InlineImage(doc, image_stream, width=Mm(50))  # Adjust width as needed
+    try:
+        if image_data.startswith('http'):
+            # Handle URL
+            response = requests.get(image_data)
+            response.raise_for_status()
+            content_type = response.headers.get('content-type', '').lower()
+            
+            if 'svg' in content_type:
+                # Convert SVG to PNG using cairosvg
+                import cairosvg
+                png_data = cairosvg.svg2png(bytestring=response.content)
+                image = Image.open(BytesIO(png_data))
+            else:
+                image = Image.open(BytesIO(response.content))
+            
+            print(f"Image format from URL: {image.format}")
+            print(image_data)
+        else:
+            # Handle base64
+            print("Base64 data received:", image_data[:30], "...")
+            if image_data.startswith('data:image'):
+                content_type = image_data.split(';')[0].split('/')[1].lower()
+                # Remove the data URL scheme
+                image_data = image_data.split(',', 1)[1]
+            
+            # Decode base64 string
+            decoded_data = base64.b64decode(image_data + "=" * (4 - len(image_data) % 4))
+            
+            if content_type == 'svg+xml':
+                # Convert SVG to PNG using cairosvg
+                import cairosvg
+                png_data = cairosvg.svg2png(bytestring=decoded_data)
+                image = Image.open(BytesIO(png_data))
+            else:
+                image = Image.open(BytesIO(decoded_data))
+
+        # Convert to InlineImage
+        print(f"Converting image to InlineImage format with format: {image.format}")
+        image_stream = BytesIO()
+        image.save(image_stream, format='PNG')  # Always save as PNG for consistency
+        image_stream.seek(0)
+        print(f"Image conversion to InlineImage format completed with format: PNG")
+        return InlineImage(doc, image_stream, width=Mm(20))
+
+    except Exception as e:
+        print(f"Error processing image data: {e}")
+        raise ValueError(f"Invalid image data provided: {str(e)}")
 
 @router.post("/generate-document/")
 async def generate_document(request: GenerateRequest, background_tasks: BackgroundTasks):
@@ -116,4 +150,8 @@ async def generate_document(request: GenerateRequest, background_tasks: Backgrou
             os.remove(output_docx)
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
+        
+        # Log stacktrace
+        traceback.print_exc()
+        
         raise HTTPException(status_code=500, detail=str(e))
