@@ -1,10 +1,11 @@
 import os
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import Template
 from fastapi.responses import FileResponse
+from typing import Optional
 
 router = APIRouter()
 
@@ -16,25 +17,47 @@ def get_db():
         db.close()
 
 @router.post("/upload-template/")
-async def upload_template(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_template(
+    file: UploadFile = File(...),
+    template_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
     if not file.filename.endswith('.docx'):
         raise HTTPException(status_code=400, detail="Only .docx files allowed")
     
-    template_id = str(uuid.uuid4())
-    file_path = f"templates/{template_id}.docx"
+    # If a template_id is provided, update the existing template
+    if template_id:
+        db_template = db.query(Template).filter(Template.id == template_id).first()
+        if not db_template:
+            raise HTTPException(status_code=404, detail="Template not found; cannot update a non-existing template")
+        
+        file_path = f"templates/{template_id}.docx"
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        contents = await file.read()
+        
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        
+        # Update the filename (and other details if needed)
+        db_template.filename = file.filename
+        db.commit()
+        
+        return {"template_id": template_id, "message": "Template updated"}
     
+    # Otherwise, create a new template record
+    new_template_id = str(uuid.uuid4())
+    file_path = f"templates/{new_template_id}.docx"
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     contents = await file.read()
     
     with open(file_path, "wb") as f:
         f.write(contents)
     
-    # Save to database
-    db_template = Template(id=template_id, filename=file.filename)
+    db_template = Template(id=new_template_id, filename=file.filename)
     db.add(db_template)
     db.commit()
     
-    return {"template_id": template_id}
+    return {"template_id": new_template_id, "message": "Template uploaded"}
 
 @router.get("/templates")
 def list_templates(db: Session = Depends(get_db)):
