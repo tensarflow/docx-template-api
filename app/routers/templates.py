@@ -4,6 +4,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import Template
+from fastapi.responses import FileResponse
 
 router = APIRouter()
 
@@ -56,4 +57,15 @@ def delete_template(template_id: str, db: Session = Depends(get_db)):
     
     db.delete(template)
     db.commit()
-    return {"message": "Template deleted"} 
+    return {"message": "Template deleted"}
+
+@router.get("/download-template/{template_id}")
+def download_template(template_id: str):
+    file_path = f"templates/{template_id}.docx"
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{template_id}.docx"
+    ) 
