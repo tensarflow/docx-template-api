@@ -74,3 +74,6 @@ The application uses Docker volumes to persist data:
 ## Environment Variables
 
 You can configure the application using environment variables. Update the `docker-compose.yml` file to set any necessary environment variables.
+
+
+rsync -avz admin@212.125.13.130:/home/admin/docx-template-api/templates/ /opt/docx-template-api/templates/

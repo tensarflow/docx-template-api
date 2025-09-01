@@ -1,0 +1,55 @@
+name: Deploy to server (password SSH)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PASS: ${{ secrets.SSH_PASS }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Add server host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${SSH_PORT:-22}" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Prepare deploy dir
+        run: |
+          sshpass -p "$SSH_PASS" ssh -p "${SSH_PORT:-22}" "${SSH_USER}@${SSH_HOST}" "\
+            mkdir -p '${DEPLOY_PATH}'"
+
+      - name: Sync code to server (exclude data dirs)
+        run: |
+          sshpass -p "$SSH_PASS" rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'db/' \
+            --exclude 'templates/' \
+            --exclude 'generated_docs/' \
+            -e "ssh -p ${SSH_PORT:-22}" \
+            ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
+
+      - name: Ensure data dirs exist
+        run: |
+          sshpass -p "$SSH_PASS" ssh -p "${SSH_PORT:-22}" "${SSH_USER}@${SSH_HOST}" "\
+            mkdir -p '${DEPLOY_PATH}/db' '${DEPLOY_PATH}/templates' '${DEPLOY_PATH}/generated_docs'"
+
+      - name: Restart service
+        run: |
+          sshpass -p "$SSH_PASS" ssh -p "${SSH_PORT:-22}" "${SSH_USER}@${SSH_HOST}" "\
+            cd '${DEPLOY_PATH}' && \
+            docker compose pull || true && \
+            docker compose build && \
+            docker compose up -d --remove-orphans"
