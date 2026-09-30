@@ -1,6 +1,11 @@
 services:
   app:
     build: .
+    restart: unless-stopped
+    environment:
+      # Shared secret the qr-certificates server sends as X-API-Key.
+      DOCX_API_KEY: ${DOCX_API_KEY:?Set DOCX_API_KEY in .env}
+      ALLOWED_IMAGE_HOSTS: ${ALLOWED_IMAGE_HOSTS:-cddlqldwjnpwwnpjqxhp.supabase.co}
     ports:
       - "8000:8000"
     volumes:

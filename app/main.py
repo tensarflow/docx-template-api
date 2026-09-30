@@ -1,30 +1,21 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI
 from app.database import engine, Base
-from fastapi.staticfiles import StaticFiles
 from app.routers import templates, generate
+from app.security import require_api_key
 
-app = FastAPI()
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust this to your frontend's domain in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No interactive docs and no CORS: only the qr-certificates server calls
+# this API, never a browser.
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 # Add database initialization
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
 
-# Mount static files for template storage
-app.mount("/templates", StaticFiles(directory="templates"), name="templates")
-app.include_router(templates.router)
-app.include_router(generate.router)
+# Template files are only reachable through the authenticated routes below.
+app.include_router(templates.router, dependencies=[Depends(require_api_key)])
+app.include_router(generate.router, dependencies=[Depends(require_api_key)])
 
 @app.get("/")
 def read_root():
-    return {"message": "DOCX Template API"} 
+    return {"message": "DOCX Template API"}

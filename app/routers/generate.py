@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from docxtpl import DocxTemplate, InlineImage
+from jinja2.sandbox import SandboxedEnvironment
+from urllib.parse import urlparse
 import subprocess
 import uuid
 import os
@@ -14,8 +16,17 @@ import traceback
 
 router = APIRouter()
 
+# Images may only be fetched from these hosts (the Supabase storage that holds
+# auditor signatures), so the server can't be used to reach arbitrary URLs.
+ALLOWED_IMAGE_HOSTS = {
+    h.strip().lower()
+    for h in os.environ.get("ALLOWED_IMAGE_HOSTS", "cddlqldwjnpwwnpjqxhp.supabase.co").split(",")
+    if h.strip()
+}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
 class GenerateRequest(BaseModel):
-    template_id: str
+    template_id: uuid.UUID
     data: dict
 
 def convert_to_pdf(docx_path: str, output_dir: str = "generated_docs"):
@@ -51,8 +62,13 @@ def get_image(image_data, doc):
     try:
         if image_data.startswith('http'):
             # Handle URL
-            response = requests.get(image_data)
+            url = urlparse(image_data)
+            if url.scheme != "https" or (url.hostname or "").lower() not in ALLOWED_IMAGE_HOSTS:
+                raise ValueError("Image URL host not allowed")
+            response = requests.get(image_data, timeout=10, allow_redirects=False)
             response.raise_for_status()
+            if len(response.content) > MAX_IMAGE_BYTES:
+                raise ValueError("Image too large")
             content_type = response.headers.get('content-type', '').lower()
             
             if 'svg' in content_type:
@@ -64,7 +80,6 @@ def get_image(image_data, doc):
                 image = Image.open(BytesIO(response.content))
             
             print(f"Image format from URL: {image.format}")
-            print(image_data)
         else:
             # Handle base64
             print("Base64 data received:", image_data[:30], "...")
@@ -103,7 +118,7 @@ async def generate_document(request: GenerateRequest, background_tasks: Backgrou
     os.makedirs("templates", exist_ok=True)
     os.makedirs("generated_docs", exist_ok=True)
     
-    template_path = f"templates/{request.template_id}.docx"
+    template_path = f"templates/{request.template_id}.docx"  # UUID-validated
     if not os.path.exists(template_path):
         raise HTTPException(status_code=404, detail="Template not found")
     
@@ -122,7 +137,8 @@ async def generate_document(request: GenerateRequest, background_tasks: Backgrou
             if isinstance(value, str) and (value.startswith('http') or value.startswith('data:image')):
                 request.data[key] = get_image(value, doc)
         
-        doc.render(request.data)
+        # Sandboxed: a template must not be able to run Python on this server.
+        doc.render(request.data, jinja_env=SandboxedEnvironment())
         doc.save(output_docx)
         
         # Convert to PDF
@@ -154,4 +170,4 @@ async def generate_document(request: GenerateRequest, background_tasks: Backgrou
         # Log stacktrace
         traceback.print_exc()
         
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Document generation failed")

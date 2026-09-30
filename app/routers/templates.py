@@ -9,6 +9,13 @@ from typing import Optional
 
 router = APIRouter()
 
+def parse_template_id(value: str) -> str:
+    # Template ids are UUIDs; anything else could escape the templates/ folder.
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid template id")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -22,11 +29,12 @@ async def upload_template(
     template_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    if not file.filename.endswith('.docx'):
+    if not (file.filename or "").endswith('.docx'):
         raise HTTPException(status_code=400, detail="Only .docx files allowed")
     
     # If a template_id is provided, update the existing template
     if template_id:
+        template_id = parse_template_id(template_id)
         db_template = db.query(Template).filter(Template.id == template_id).first()
         if not db_template:
             raise HTTPException(status_code=404, detail="Template not found; cannot update a non-existing template")
@@ -66,10 +74,11 @@ def list_templates(db: Session = Depends(get_db)):
         return {"templates": [{"id": t.id, "filename": t.filename} for t in templates]}
     except Exception as e:
         print(f"Error querying templates: {e}")  # Debug print
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not list templates")
 
 @router.delete("/delete-template/{template_id}")
 def delete_template(template_id: str, db: Session = Depends(get_db)):
+    template_id = parse_template_id(template_id)
     template = db.query(Template).filter(Template.id == template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -84,6 +93,7 @@ def delete_template(template_id: str, db: Session = Depends(get_db)):
 
 @router.get("/download-template/{template_id}")
 def download_template(template_id: str):
+    template_id = parse_template_id(template_id)
     file_path = f"templates/{template_id}.docx"
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Template not found")
